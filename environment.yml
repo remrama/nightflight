@@ -1,0 +1,14 @@
+name: nightflight
+
+dependencies:
+  - python=3.11
+  - ipython  # development
+  - ruff  # development
+  - numpy
+  - pandas
+  - openpyxl  # read excel with pandas
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - colorcet  # plot colormaps
+  - conda-forge::spacy  # plot spans
