@@ -39,7 +39,7 @@ type_order = ["narrative", "observation"]
 # xtick_labels = list(corpus["source"].unique())
 xtick_labels = ["Reddit", "LD4all", "SDDb", "DreamBank"]
 
-fig, ax = plt.subplots(figsize=(3.5, 3), constrained_layout=True)
+fig, ax = plt.subplots(figsize=(2.5, 3), constrained_layout=True)
 
 for source, df in corpus.query("source.isin(@xtick_labels)").groupby("source"):
     for report_type in type_order:
@@ -53,7 +53,7 @@ for source, df in corpus.query("source.isin(@xtick_labels)").groupby("source"):
             **box_kwargs,
         )
 
-# ax.set_yscale("log")
+ax.set_yscale("log")
 ax.set_xlabel("Data source", labelpad=1)
 ax.set_ylabel(r"$n$ lemmas", labelpad=1)
 ax.set_xticks(range(len(xtick_labels)))
