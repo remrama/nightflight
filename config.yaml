@@ -6,7 +6,7 @@
 
 directories:
   sourcedata: ./sourcedata  # READ-ONLY!!!
-  derivatives: ./derivatives  # WRITE
+  descriptives: ./descriptives  # WRITE
   archive: ./archive  # WRITE
 
 source_filenames:
