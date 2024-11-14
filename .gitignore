@@ -4,7 +4,6 @@ __pycache__/
 *.code-workspace
 
 archive/
-derivatives/
 figures/
 sourcedata/
 temp_*.py

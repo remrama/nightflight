@@ -1,15 +1,10 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status
-set -e
-
-# Print each command before executing it
-set -x
+set -e  # Exit immediately if a command exits with a non-zero status
+set -x  # Print each command before executing it
 
 # Preparation scripts
-python prep_corpus.py
-python prep_annotation_labels.py
-python prep_annotation_spans.py
+python prep_archive.py
 
 # Calculation scripts
 python calc_counts.py

@@ -1,21 +1,37 @@
 """
 Utility functions.
 """
-
+import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import yaml
+
+
+# Load configuration from `config.yml`
+with open("./config.yaml", "r", encoding="utf-8") as f:
+    config = yaml.safe_load(f)
+
+# Convert all directory paths to `pathlib.Path` objects
+for k, v in config["directories"].items():
+    config["directories"][k] = Path(v)
 
 
 # Define directory paths used in all files
-archive_directory = Path("./archive")
 derivatives_directory = Path("./derivatives")
-sourcedata_directory = Path("./sourcedata")
+archive_directory = derivatives_directory / "archive"
 
-# Create directories if they do not exist
-archive_directory.mkdir(exist_ok=True)
-derivatives_directory.mkdir(exist_ok=True)
+
+def get_logger(fstem=None, **kwargs):
+    fstem = fstem or "misc"
+    kwargs.setdefault("filename", f"{fstem}.log")
+    kwargs.setdefault("level", logging.INFO)
+    kwargs.setdefault("filemode", "a")
+    kwargs.setdefault("format", "%(asctime)s - %(levelname)s - %(message)s")
+    kwargs.setdefault("datefmt", "%Y-%m-%dT%H:%M:%S%z")
+    logging.basicConfig(**kwargs)
+    return logging.getLogger()
 
 
 def get_color_palette() -> dict:
@@ -26,18 +42,8 @@ def get_color_palette() -> dict:
     -------
     dict
         A dictionary where keys are labels (str) and values are their corresponding hex-colors (str).
-        The labels include:
-        - "narrative": "#0c7bdc"
-        - "observation": "#ffc20a"
-        - "lucid": "#29c9e6"
-        - "flying": "#fca094"
     """
-    palette = {
-        "narrative": "#0c7bdc",
-        "observation": "#ffc20a",
-        "lucid": "#29c9e6",  # "#29cae7",
-        "flying": "#fca094",  # "#fda094",
-    }
+    palette = config["palette"]
     return palette
 
 
@@ -52,18 +58,7 @@ def get_marker_palette() -> dict:
         The marker styles are represented by single-character strings,
         corresponding to the markers available in `Line2D.filled_markers`.
     """
-    markers = {
-        "AlchemyForums": "h",
-        "DreamBank": "o",
-        "IDreamOfCovid": "<",
-        "IntArchivDreams": "v",
-        "LD4all": "s",
-        "LucidityInstitute": "8",
-        "Reddit": "^",
-        "SDDb": "*",
-        "StraightDope": "p",
-        "Twitter": ">",
-    }
+    markers = config["markers"]
     return markers
 
 
@@ -81,10 +76,10 @@ def load_corpus(**kwargs) -> pd.DataFrame:
     pd.DataFrame
         The loaded corpus as a pandas DataFrame.
     """
-    kwargs.setdefault("index_col", "report_id")
+    kwargs.setdefault("index_col", "id")
     kwargs.setdefault("sep", "\t")
     kwargs.setdefault("encoding", "utf-8")
-    import_path = archive_directory / "dreamfar-corpus.tsv"
+    import_path = derivatives_directory / "archive" / "dfa-corpus.tsv"
     corpus = pd.read_csv(import_path, **kwargs)
     return corpus
 
@@ -163,15 +158,5 @@ def set_global_matplotlib_settings(**kwargs) -> None:
     **kwargs : dict, optional
         Additional matplotlib settings to override the default custom settings.
     """
-    custom_settings = {
-        "interactive": False,
-        "savefig.dpi": 300,
-        "font.family": "sans-serif",
-        "font.sans-serif": "Arial",
-        "mathtext.fontset": "custom",
-        "mathtext.rm": "Arial",
-        "mathtext.it": "Arial:italic",
-        "mathtext.bf": "Arial:bold",
-    }
-    custom_settings.update(kwargs)
+    custom_settings = config["rc_params"] | kwargs
     plt.rcParams.update(custom_settings)
