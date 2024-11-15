@@ -7,6 +7,8 @@ This script processes the raw sourcedata files into the first official version o
 2. Load/validate/clean label annotations.
 3. Load/validate/clean span annotations.
 4. Fill missing values in datapackage template.
+5. Export processed files to archive directory.
+6. Validate the exported archive.
 """
 
 import argparse
@@ -15,11 +17,13 @@ import json
 import mimetypes
 import random
 import string
+from contextlib import chdir
 from datetime import datetime, timezone
 
 import pandas as pd
+from frictionless import Package
 
-import utils
+import config
 
 
 
@@ -75,8 +79,8 @@ def generate_identifier_mapping(unique_values, nchars=4, seed=32) -> dict:
 
 
 def get_archive_paths():
-    archive_directory = utils.config["directories"]["archive"]
-    datapackage_template_fp = utils.config["directories"]["sourcedata"] / utils.config["source_filenames"]["datapackage"]
+    archive_directory = config.directories["archive"]
+    datapackage_template_fp = config.directories["sourcedata"] / config.source_filenames["datapackage"]
     with datapackage_template_fp.open("r", encoding="utf-8") as f:
         data = json.load(f)
     resources = data["resources"]
@@ -94,7 +98,7 @@ def get_archive_paths():
 def check_for_archive_files(overwrite: bool = False):
     assert isinstance(overwrite, bool), "Overwrite must be a boolean."
     fpaths = get_archive_paths().values()
-    parent = utils.config["directories"]["archive"]
+    parent = config.directories["archive"]
     parent_exists = parent.exists()
     file_exists = any(fp.exists() for fp in fpaths)
     if parent_exists:
@@ -124,11 +128,11 @@ def check_for_source_files():
     FileNotFoundError
         If the source files are not present in the sourcedata directory.
     """
-    sourcedata_directory = utils.config["directories"]["sourcedata"]
+    sourcedata_directory = config.directories["sourcedata"]
     if not sourcedata_directory.exists():
         raise FileNotFoundError(f"Source data directory not found at '{sourcedata_directory}'.")
     source_fnames = []
-    for value in utils.config["source_filenames"].values():
+    for value in config.source_filenames.values():
         if isinstance(value, list):
             source_fnames.extend(value)
         elif isinstance(value, str):
@@ -141,7 +145,7 @@ def check_for_source_files():
 
 
 def process_corpus():
-    import_path = utils.config["directories"]["sourcedata"] / utils.config["source_filenames"]["corpus"]
+    import_path = config.directories["sourcedata"] / config.source_filenames["corpus"]
     CHAR_LENGTH_BETWEEN = (50, 5000)
     COLUMN_ORDER = [
         "id",
@@ -312,11 +316,11 @@ def process_corpus():
 
 
 def process_spans():
-    annotator_fnames = utils.config["source_filenames"]["spans"]
-    sourcedata_directory = utils.config["directories"]["sourcedata"]
+    annotator_fnames = config.source_filenames["spans"]
+    sourcedata_directory = config.directories["sourcedata"]
     # Load annotators into dataframe
     dataframes = {}
-    for fn in annotator_fnames:
+    for i, fn in enumerate(sorted(annotator_fnames)):
         import_path = sourcedata_directory / fn
         # Load source data annotation file and validate quality
         df = pd.read_json(import_path, lines=True)
@@ -335,7 +339,8 @@ def process_spans():
         # df = df.query("id.isin(@corpus.report_id)")
         # Export as JSONL
         # df.to_json(export_path, lines=True, orient="records", force_ascii=False)
-        dataframes[fn.split(".")[0]] = df
+        annotator_id = "A" + string.ascii_uppercase[i]
+        dataframes[annotator_id] = df
     # # suffixes = ("_" + fname.split(".")[0] for fname in annotator_fnames)
     # # anns = pd.merge(*annotator_dfs, on="id", suffixes=suffixes, how="outer", validate="1:1")
     # d = annotator_dfs[0]
@@ -358,9 +363,9 @@ def process_spans():
 
 
 def process_labels():
-    sourcedata_directory = utils.config["directories"]["sourcedata"]
-    labels_fpath = sourcedata_directory / utils.config["source_filenames"]["labels"]
-    mapping_fpath = sourcedata_directory / utils.config["source_filenames"]["mapping"]
+    sourcedata_directory = config.directories["sourcedata"]
+    labels_fpath = sourcedata_directory / config.source_filenames["labels"]
+    mapping_fpath = sourcedata_directory / config.source_filenames["mapping"]
     labels = pd.read_excel(labels_fpath)
     mapping = pd.read_excel(mapping_fpath, index_col="gpt_id").squeeze().to_dict()
     # Map GPT IDs to report IDs
@@ -374,11 +379,13 @@ def process_labels():
         .dropna(subset=["id"])
         .set_index("id")
         .filter(regex=r"Lucidity_(T|C)[A-Z]{1,3}")
+        .sort_index(axis="columns")
+        .pipe(lambda df: df.rename(columns=lambda x: "A" + string.ascii_uppercase[df.columns.get_loc(x)]))
         .melt(ignore_index=False, var_name="annotator", value_name="label")
         .replace({"label": {0: "non-lucid", 1: "lucid"}})
         .reset_index(drop=False)
     )
-    df["annotator"] = df["annotator"].str.split("_").str[1]
+    # df["annotator"] = df["annotator"].str.split("_").str[1]
     # for r in raters:
     #     # assert df["label"].notna().all(), "Invalid lucidity values."
     #     codings[r] = y[f"Lucidity_{rater}"].map({0: "non-lucid", 1: "lucid"})
@@ -404,20 +411,47 @@ def process_datapackage():
     Get current date and time in ISO 8601 format
     """
     # Load template
-    import_path = utils.config["directories"]["sourcedata"] / utils.config["source_filenames"]["datapackage"]
+    import_path = config.directories["sourcedata"] / config.source_filenames["datapackage"]
     with import_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     # Fill empty values that need to be generated from files that were just made
-    data["version"] = utils.config["archive_metadata"]["version"]
+    data["version"] = config.archive_metadata["version"]
     data["created"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for r in data["resources"]:
-        fp = utils.config["directories"]["archive"] / r["path"]
+        fp = config.directories["archive"] / r["path"]
         assert fp.exists(), f"Resource file not found: {fp}"
         assert (x := r["format"]) == (y := fp.suffix[1:]), f"File format mismatch: {x} != {y}"
         assert (x := r["mediatype"]) == (y := mimetypes.guess_type(fp)[0]), f"Media type mismatch: {x} != {y}"
         r["hash"] = get_file_hash(fp)
         r["bytes"] = fp.stat().st_size
     return data
+
+
+def validate_archive():
+    # Validate the exported archive.
+    archive_dir = config.directories["archive"]
+    with chdir(archive_dir):
+        # This will catch with a FrictionlessException if the datapackage.json is not valid.
+        package = Package("datapackage.json")
+        # This will validate resources in package (and other things)
+        report = package.validate()
+    if not report.valid:
+        print(report.to_summary())
+    else:
+        print("Archive is valid.")
+    #     for task in report.tasks:
+    #         if task.valid:
+    #             name = task.name
+    #             path = task.place
+    #             stats = task.stats
+    #             hash_ = stats["hash"]
+    #             bytes_ = stats["bytes"]
+
+    # version = report["version"]
+    # from pandera.io import from_frictionless_schema
+    # for resource in data["resources"]:
+    #     frictionless_schema = resource["schema"]
+    #     pandera_schema = from_frictionless_schema(frictionless_schema)
 
 
 
@@ -433,7 +467,7 @@ if __name__ == "__main__":
     check_for_source_files()
     check_for_archive_files(overwrite)
 
-    archive_directory = utils.config["directories"]["archive"]
+    archive_directory = config.directories["archive"]
 
     archive_directory.mkdir(exist_ok=True, parents=False)
 
@@ -460,3 +494,5 @@ if __name__ == "__main__":
     export_tabular(spans, export_paths["spans"])
     datapackage = process_datapackage()
     export_json(datapackage, export_paths["datapackage"])
+
+    validate_archive()

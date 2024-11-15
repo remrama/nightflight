@@ -13,7 +13,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from spacy import displacy
 
-import utils
+import config
 from describe import load_dfa
 
 
@@ -29,12 +29,46 @@ def set_rcparams(**kwargs) -> None:
     **kwargs : dict, optional
         Additional matplotlib settings to override the default custom settings.
     """
-    custom_settings = utils.config["rc_params"] | kwargs
-    plt.rcParams.update(custom_settings)
+    rcparams = {
+        "interactive": False,
+        "savefig.dpi": 300,
+        "font.family": "sans-serif",
+        "font.sans-serif": "Arial",
+        "mathtext.fontset": "custom",
+        "mathtext.rm": "Arial",
+        "mathtext.it": "Arial:italic",
+        "mathtext.bf": "Arial:bold"
+    }
+    rcparams.update(kwargs)
+    plt.rcParams.update(rcparams)
+
+
+def get_palette():
+    return {
+        "narrative": "#0c7bdc",
+        "observation": "#ffc20a",
+        "lucid": "#29c9e6",  # #29cae7
+        "flying": "#fca094"  # #fda094
+    }
+
+
+def get_markers():
+    return {
+        "AlchemyForums": "h",
+        "DreamBank": "o",
+        "IDreamOfCovid": "<",
+        "IntArchivDreams": "v",
+        "LD4all": "s",
+        "LucidityInstitute": "8",
+        "Reddit": "^",
+        "SDDb": "*",
+        "StraightDope": "p",
+        "Twitter": ">"
+    }
 
 
 def save_and_close_fig(fstem, suffixes=False, **kwargs):
-    fp = utils.config["directories"]["descriptives"] / "plots" / fstem
+    fp = config.directories["descriptives"] / "plots" / fstem
     for suff in suffixes:
         plt.savefig(fp.with_suffix(suff), **kwargs)
     plt.close()
@@ -73,7 +107,7 @@ def plot_annotation():
     spans = load_dfa("spans", index_col=["id", "annotator"])
     text = corpus.at[id_, "text"]
     annotator1 = spans.loc[(id_, annotator)]
-    annotator1 = utils.load_annotations("annotator1", drop_text=False)
+    # annotator1 = load_annotations("annotator1", drop_text=False)
     text = annotator1.at[id_, "report"]
     labels = annotator1.at[id_, "labels"]
     # Convert character indices to token indices
@@ -92,7 +126,7 @@ def plot_annotation():
         }
         for start, end, label in labels
     ]
-    palette = {k.capitalize(): v for k, v in utils.config["palette"].items()}
+    palette = {k.capitalize(): v for k, v in get_palette().items()}
     tokens = [token.text for token in doc]
     # tokens = list(doc)
     data = {"text": text, "spans": spans, "tokens": tokens}
@@ -106,9 +140,9 @@ def plot_authors():
     """
     Visualize relationship between report and author sample size for each source and report type.
     """
-    import_path = utils.config["directories"]["descriptives"] / "tables" / "counts.tsv"
-    palette = utils.config["palette"]
-    markers = utils.config["markers"]
+    import_path = config.directories["descriptives"] / "tables" / "counts.tsv"
+    palette = get_palette()
+    markers = get_markers()
     counts = pd.read_table(import_path, index_col=["source", "type"])
     type_order = ["narrative", "observation"]
     scatter_kwargs = dict(s=90, clip_on=False, edgecolor="white", linewidth=0.5)
@@ -157,8 +191,8 @@ def plot_sources():
     """
     Visualize the frequency of narratives and observations across all data sources.
     """
-    import_path = utils.config["directories"]["descriptives"] / "tables" / "counts.tsv"
-    palette = utils.config["palette"]
+    import_path = config.directories["descriptives"] / "tables" / "counts.tsv"
+    palette = get_palette()
     counts = pd.read_table(import_path)
     report_counts = (
         counts.pivot(index="source", columns="type", values="n_reports")
@@ -211,7 +245,7 @@ def plot_wordcount():
     Visualize lemma counts of all reports by source and report type.
     """
     corpus = load_dfa("corpus", index_col="id")
-    palette = utils.config["palette"]
+    palette = get_palette()
     # Get lengths
     corpus["n_chars"] = corpus["text"].str.len()
     corpus["n_lemmas"] = corpus["text"].str.split().str.len()
@@ -260,7 +294,7 @@ if __name__ == "__main__":
     img_extensions = args.extensions
     img_suffixes = [f".{ext}" for ext in img_extensions]
 
-    descriptives_directory = utils.config["directories"]["descriptives"]
+    descriptives_directory = config.directories["descriptives"]
     descriptives_directory.mkdir(parents=False, exist_ok=True)
     plots_directory = descriptives_directory / "plots"
     plots_directory.mkdir(parents=False, exist_ok=True)

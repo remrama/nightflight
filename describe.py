@@ -5,13 +5,13 @@ Calculation functions for descriptive statistics of the archive.
 import pandas as pd
 from sklearn import metrics
 
-import utils
+import config
 from prepare import export_tabular
 
 
 def load_dfa(name, **kwargs):
     assert name in ["corpus", "labels", "spans"]
-    import_path = utils.config["directories"]["archive"] / f"dfa-{name}.tsv"
+    import_path = config.directories["archive"] / f"dfa-{name}.tsv"
     return pd.read_table(import_path, **kwargs)
 
 
@@ -89,7 +89,7 @@ def calculate_subsources():
 
 if __name__ == "__main__":
 
-    descriptives_directory = utils.config["directories"]["descriptives"]
+    descriptives_directory = config.directories["descriptives"]
     descriptives_directory.mkdir(parents=False, exist_ok=True)
     tables_directory = descriptives_directory / "tables"
     tables_directory.mkdir(parents=False, exist_ok=True)
