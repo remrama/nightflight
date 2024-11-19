@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 _sourcedata_dir = "./sourcedata"  # READ-ONLY!!!
@@ -22,3 +23,13 @@ archive_metadata = {
     "full_name": "Dream Flight Archive",
     "version": "0.0.1-beta",
 }
+
+def get_logger(fstem=None, **kwargs):
+    fstem = fstem or "misc"
+    kwargs.setdefault("filename", f"{fstem}.log")
+    kwargs.setdefault("level", logging.INFO)
+    kwargs.setdefault("filemode", "a")
+    kwargs.setdefault("format", "%(asctime)s - %(levelname)s - %(message)s")
+    kwargs.setdefault("datefmt", "%Y-%m-%dT%H:%M:%S%z")
+    logging.basicConfig(**kwargs)
+    return logging.getLogger()

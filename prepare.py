@@ -19,15 +19,20 @@ import random
 import string
 from contextlib import chdir
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional, Union
 
 import pandas as pd
+import spacy
 from frictionless import Package
+from spacy.language import Language
+from spacy.tokens import Span
 
 import config
 
 
 
-def export_json(data, filepath, **kwargs):
+def export_json(data: dict, filepath: Union[str, Path], **kwargs: Optional[Any]) -> None:
     kwargs.setdefault("indent", 4)
     kwargs.setdefault("ensure_ascii", True)
     kwargs.setdefault("sort_keys", False)
@@ -35,7 +40,7 @@ def export_json(data, filepath, **kwargs):
         json.dump(data, f, **kwargs)
     return
 
-def export_tabular(data, filepath, **kwargs):
+def export_tabular(data: pd.DataFrame, filepath: Union[str, Path], **kwargs: Optional[Any]) -> None:
     kwargs.setdefault("index", False)
     kwargs.setdefault("sep", "\t")
     kwargs.setdefault("encoding", "utf-8")
@@ -50,7 +55,7 @@ def export_tabular(data, filepath, **kwargs):
     return
 
 
-def get_file_hash(filepath, alg="md5"):
+def get_file_hash(filepath: Union[str, Path], alg: str = "md5") -> str:
     hash_func = hashlib.new(alg)
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
@@ -58,7 +63,7 @@ def get_file_hash(filepath, alg="md5"):
     return hash_func.hexdigest()
 
 
-def generate_identifier(length: int = 4, seed: int = None) -> str:
+def generate_identifier(length: int = 4, seed: Optional[int] = None) -> str:
     assert length >= 2, "Length must be at least 2"
     odd_chars = string.ascii_uppercase
     even_chars = string.digits
@@ -68,7 +73,7 @@ def generate_identifier(length: int = 4, seed: int = None) -> str:
     return id_
 
 
-def generate_identifier_mapping(unique_values, nchars=4, seed=32) -> dict:
+def generate_identifier_mapping(unique_values: list[Union[int, str]], nchars: int = 4, seed: int = 32) -> dict:
     assert len(unique_values) == len(set(unique_values)), "Non-unique values found"
     mapping = {}
     for value in unique_values:
@@ -78,7 +83,7 @@ def generate_identifier_mapping(unique_values, nchars=4, seed=32) -> dict:
     return mapping
 
 
-def get_archive_paths():
+def get_archive_paths() -> dict[str, Path]:
     archive_directory = config.directories["archive"]
     datapackage_template_fp = config.directories["sourcedata"] / config.source_filenames["datapackage"]
     with datapackage_template_fp.open("r", encoding="utf-8") as f:
@@ -95,7 +100,7 @@ def get_archive_paths():
     # filepaths = {name: archive_directory / fn for name, fn in filenames.items()}
     return filepaths
 
-def check_for_archive_files(overwrite: bool = False):
+def check_for_archive_files(overwrite: bool = False) -> None:
     assert isinstance(overwrite, bool), "Overwrite must be a boolean."
     fpaths = get_archive_paths().values()
     parent = config.directories["archive"]
@@ -119,7 +124,7 @@ def check_for_archive_files(overwrite: bool = False):
     return
 
 
-def check_for_source_files():
+def check_for_source_files() -> None:
     """
     Check if the source files are present in the sourcedata directory.
 
@@ -144,7 +149,141 @@ def check_for_source_files():
             raise FileNotFoundError(f"Source file '{fn}' not found in '{sourcedata_directory}'.")
 
 
-def process_corpus():
+def _merge_overlapping_spans(spans: list[Span]) -> list[Span]:
+    """
+    Merge overlapping spans into a single span.
+
+    Parameters
+    ----------
+    spans : List[Span]
+        List of Span objects to merge.
+
+    Example
+    -------
+    >>> spans = [Span(doc, 0, 5, label="flying"), Span(doc, 3, 8, label="flying")]
+    >>> merged_spans = _merge_overlapping_spans(spans)
+    >>> merged_spans
+    [Span(doc, 0, 8, label="flying")]
+    """
+    assert all(isinstance(span, Span) for span in spans), "All spans must be Span objects"
+    merged_spans = spacy.util.filter_spans(spans)
+    return merged_spans
+
+
+def _merge_touching_spans(spans: list[Span]) -> list[Span]:
+    """
+    Merge touching/connected spans into a single span.
+
+    Parameters
+    ----------
+    spans : List[Span]
+        List of Span objects to merge.
+
+    Example
+    -------
+    >>> spans = [Span(doc, 0, 5, label="flying"), Span(doc, 5, 8, label="flying")]
+    >>> merged_spans = _merge_touching_spans(spans)
+    >>> merged_spans
+    [Span(doc, 0, 8, label="flying")]
+    """
+    assert all(isinstance(span, Span) for span in spans), "All spans must be Span objects"
+    merged_spans = []
+    for span in spans:
+        if merged_spans and merged_spans[-1].end == span.start:
+            merged_spans[-1] = Span(
+                span.doc,
+                merged_spans[-1].start,
+                span.end,
+                label=span.label_,
+                # span_id=span.id_ ,
+            )
+        else:
+            merged_spans.append(span)
+    return merged_spans
+
+
+def merge_spans_on_groupby(df: pd.DataFrame, texts: dict[str, str], nlp: Language) -> pd.DataFrame:
+    """
+    This function is used to merge overlapping spans within a groupby object.
+    The overall number of spans is reduced because it combines overlapping
+    and touching spans within each annotator/label group (for each id).
+    Also drops empty spans (where start is NaN).
+
+    1. Overlapping spans (e.g., [0, 5] and [3, 8]) are merged into a single span [0, 8]
+    2. Touching spans (e.g., [0, 5] and [5, 8]) are merged into a single span [0, 8]
+
+    It only works when passed to groupby.apply as such:
+        .groupby("id", as_index=True).apply(_merge_spans_on_groupby)
+    and expects the groupby object to have the following columns:
+        ["annotator", "label", "start", "end", "span_id"]
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with index named "id" and columns ["annotator", "label", "start", "end", "span_id"]
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ["annotator", "label", "start", "end", "span_id"]
+        where overlapping and touching spans have been merged.
+        
+    Example
+    -------
+    >>> df = pd.DataFrame({
+    ...     "id": ["H5Y2K6U1", "H5Y2K6U1", "H5Y2K6U1", "H5Y2K6U1", "H5Y2K6U1", "H5Y2K6U1"],
+    ...     "annotator": ["AA", "AA", "AA", "AB", "AB", "AB"],
+    ...     "label": ["flying", "flying", "flying", "flying", "flying", "flying"],
+    ...     "start": [0, 3, 5, 0, 3, 5],
+    ...     "end": [5, 8, 8, 5, 8, 8],
+    ...     "span_id": ["A0", "A1", "A2", "B0", "B1", "B2"],
+    ... })
+    >>> df.groupby("id", as_index=True).apply(_merge_spans_on_groupby, include_groups=False).reset_index(1, drop=True)
+             annotator   label  start  end span_id
+    id
+    H5Y2K6U1        AA  flying      0   13      A0
+    H5Y2K6U1        AB  flying      0   13      B0
+    """
+    id_ = df.name
+    # id_ = "A0Z7A2J1"
+    text = texts[id_]
+    doc = nlp(text)
+    def _row_to_token_span(row: pd.Series) -> Span:
+        """Extract row data about character span and return spaCy token span."""
+        return doc.char_span(row["start"], row["end"], label=row["label"], alignment_mode="expand")
+        # return doc.char_span(row["start"], row["end"], label=row["label"], span_id=row["span_id"], alignment_mode="expand")
+
+    spans_data = []
+    for (annotator, label), df_ in df.groupby(["annotator", "label"]): #, as_index=True, sort=True):
+        raw_spans = df_.apply(_row_to_token_span, axis=1).tolist()
+        assert all(raw_spans), "Invalid span"
+        merged_spans_no_overlap = _merge_overlapping_spans(raw_spans)
+        merged_spans_no_touch = _merge_touching_spans(merged_spans_no_overlap)
+        for span in merged_spans_no_touch:
+            span_data = {
+                "annotator": annotator,
+                "start": span.start_char,
+                "end": span.end_char,
+                "label": span.label_,
+                # "span_id": span.id_,
+            }
+            spans_data.append(span_data)
+    # print("====================================================")
+    # print(id_)
+    # print("----------------------------------------------------")
+    # print(spans_data)
+    return (
+        pd.DataFrame(spans_data)
+        .sort_values(["annotator", "label", "start"], kind="stable")
+        .reindex(columns=["annotator", "label", "start", "end"])
+        .reset_index(drop=True)
+    )
+    # group = SpanGroup(doc, name=label, spans=merged_spans, attrs={"annotator": annotator})
+    # doc.spans[ann] = group
+    # span_groups.append(group)
+
+
+def process_corpus() -> pd.DataFrame:
     import_path = config.directories["sourcedata"] / config.source_filenames["corpus"]
     CHAR_LENGTH_BETWEEN = (50, 5000)
     COLUMN_ORDER = [
@@ -153,6 +292,10 @@ def process_corpus():
         "thread",
         "source",
         "subsource",
+        "age",
+        "sex",
+        "race",
+        "date",
         "text",
         "type",
     ]
@@ -169,10 +312,10 @@ def process_corpus():
         "plane_vehicle",  # incomplete
         "impossible_object_flight",  # incomplete
         "unassisted_flight_other",  # incomplete
-        "age",  # unreliable
-        "sex",  # unreliable
-        "race",  # unreliable
-        "date",  # unreliable
+        # "age",  # unreliable
+        # "sex",  # unreliable
+        # "race",  # unreliable
+        # "date",  # unreliable
         "user_info",  # redundant with author_id column (slightly different but less reliable, eg [deleted])
     ]
     RENAME_COLUMNS = {
@@ -191,12 +334,24 @@ def process_corpus():
             "comment": "observation",
         },
         "sex": {
-            1: "male",
-            2: "female",
-            4: "they",
+            1: "male (he/him)",
+            2: "female (she/her)",
+            3: "they/them",
+            4: "she/they",
+            5: "they/he",
+            6: "he/they",
+            7: "they/she",
             "Female": "female",
             "unspecified": "unspecified",
-            pd.NA: "unspecified",  # or use .fillna({"sex": "unspecified"})
+            # pd.NA: "unspecified",  # or use .fillna({"sex": "unspecified"})
+        },
+        "race": {
+            0: "other/mixed race",
+            1: "white",
+            2: "hispanic",
+            3: "african american/black",
+            4: "asian or pacific islander",
+            5: "native american or alaskan native",
         },
         "source": {
             "Alchemy forums": "AlchemyForums",
@@ -304,65 +459,94 @@ def process_corpus():
     #         .str.replace('"', "'")
     #         .str.strip()
     #     )
-    # Validate
-    assert df.drop(columns=["subsource"]).notna().all(axis=None), "Unexpected empty cells found"
-    assert df["id"].is_unique, "Non-unique report IDs found"
-    assert df["text"].is_unique, "Non-unique report texts found"
-    assert df["type"].isin(["narrative", "observation"]).all(), "Invalid report types found"
-    assert df["source"].str.count(" ").eq(0).all(), "Invalid source names found"
-    assert df["text"].str.len().between(*CHAR_LENGTH_BETWEEN).all(), "Invalid report text lengths found"
-    # assert df["subsource"].str.count(" ").eq(0).all(), "Invalid subsource names found"
+    # # Validate
+    # assert df.drop(columns=["subsource"]).notna().all(axis=None), "Unexpected empty cells found"
+    # assert df["id"].is_unique, "Non-unique report IDs found"
+    # assert df["text"].is_unique, "Non-unique report texts found"
+    # assert df["type"].isin(["narrative", "observation"]).all(), "Invalid report types found"
+    # assert df["source"].str.count(" ").eq(0).all(), "Invalid source names found"
+    # assert df["text"].str.len().between(*CHAR_LENGTH_BETWEEN).all(), "Invalid report text lengths found"
+    # # assert df["subsource"].str.count(" ").eq(0).all(), "Invalid subsource names found"
+    df = df.astype("string")
     return df
 
 
-def process_spans():
+def process_spans(corpus_texts: dict[str, str], nlp: Language) -> pd.DataFrame:
+    """
+    Load and process the span annotations from the source files.
+    Each annotator's Doccano annotation file is loaded and the spans are extracted.
+    All annotations/annotators are combined into one dataframe.
+    """
+    def _insert_empty_spans(spans_list: list[list[Optional[str]]]) -> list[list[Optional[str]]]:
+        # Mostly a correction step bc they annotated both at the same time so not really an "empty" output
+        # Get labels from datapackage
+        empty_code = pd.NA
+        possible_labels = ["lucid", "flying"]
+        annotated_labels = [x[2] for x in spans_list]
+        for label in possible_labels:
+            if label not in annotated_labels:
+                spans_list.append([empty_code, empty_code, label])
+        return spans_list
+
     annotator_fnames = config.source_filenames["spans"]
     sourcedata_directory = config.directories["sourcedata"]
-    # Load annotators into dataframe
-    dataframes = {}
+    annotations = {}
     for i, fn in enumerate(sorted(annotator_fnames)):
-        import_path = sourcedata_directory / fn
-        # Load source data annotation file and validate quality
-        df = pd.read_json(import_path, lines=True)
-        df = df.drop(columns=["id"]).rename(columns={"report_id": "id", "label": "spans"}).set_index("id")["spans"]
-        # assert df.notna().all(axis=None), f"{fn} has missing values."
-        # assert df.index.notna().all(), f"{fn} has missing report IDs."
-        # assert df.index.is_unique, f"{fn} has duplicate report IDs."
-        # assert df["text"].is_unique, f"{fn} has duplicate text reports."
-        # assert df["Comments"].str.len().isin([0, 1]).all(), f"{fn} has extra comments."
-        # df["id"] = df["id"].str.split("-").str[1]
-        # Clean a bit
-        # df = df.rename(columns={"label": "spans"}).reindex(columns=["annotator", "id", "spans"])
-        # Convert labels (Doccano format) to spans (generalizable, old spaCy format)
-        # df["spans"] = df["spans"].apply(lambda labels: [{"start": start, "end": end, "label": label} for start, end, label in labels])
-        # # Filter to verify all report IDs are in the corpus
-        # df = df.query("id.isin(@corpus.report_id)")
-        # Export as JSONL
-        # df.to_json(export_path, lines=True, orient="records", force_ascii=False)
-        annotator_id = "A" + string.ascii_uppercase[i]
-        dataframes[annotator_id] = df
-    # # suffixes = ("_" + fname.split(".")[0] for fname in annotator_fnames)
-    # # anns = pd.merge(*annotator_dfs, on="id", suffixes=suffixes, how="outer", validate="1:1")
-    # d = annotator_dfs[0]
-    # d["id"] = d["id"].str.split("-").str[1]
-    # x = df.merge(d, on="id", how="left", validate="1:1")
-    # x = x.dropna(subset=["text_y"])
-    # assert x["text_x"].eq(x["text_y"]).all(), "Texts do not match"
-    # x = x.drop(columns=["text_y"]).rename(columns={"spans": "annotator1"})
-    # df = pd.concat(annotator_dfs, axis=1)
-    df = (
-        pd.concat(dataframes, names=["annotator"])
+        annotations["A" + string.ascii_uppercase[i]] = (
+            pd.read_json(sourcedata_directory / fn, lines=True)
+            .drop(columns=["id"])
+            .rename(columns={"report_id": "id", "label": "spans"})
+            .set_index("id")
+            ["spans"]
+        )
+    raw_spans = (
+        pd.concat(annotations, names=["annotator"])
         .explode()
         .apply(pd.Series)
         .rename(columns={0: "start", 1: "end", 2: "label"})
         .swaplevel()
         .reset_index(drop=False)
-        # .fillna("N/A")
     )
-    return df
+    columns = ["id", "span_id", "annotator", "start", "end", "label"]
+    sort_columns = ["annotator", "label", "start"]
+    corpus_ids = list(corpus_texts.keys())
+    merged_spans = (
+        raw_spans
+        .query("id.isin(@corpus_ids)")
+        # Span merging
+        .groupby("id", as_index=True)
+        .apply(merge_spans_on_groupby, include_groups=False, texts=corpus_texts, nlp=nlp)
+        .reset_index("id", drop=False)
+        # # Fill empty spans
+        # .apply(_insert_empty_spans)
+    )
+    # Add empty spans to id/annotator/label combos that don't exist
+    empty_spans = (
+        merged_spans
+        .groupby(["id", "annotator"])["label"]
+        .value_counts()
+        .unstack(["annotator", "label"], fill_value=0)
+        .eq(0)
+        .melt(value_name="no_spans", ignore_index=False)
+        .query("no_spans")
+        .drop(columns=["no_spans"])
+        .reset_index(drop=False)
+        # .assign(start=pd.NA, end=pd.NA)
+    )
+    spans = pd.concat([merged_spans, empty_spans], axis=0, ignore_index=True)
+    span_mapping = generate_identifier_mapping(spans.index, nchars=3, seed=23)
+    spans = (
+        spans
+        .assign(span_id=spans.index.map(span_mapping))
+        # Tidy up: sort rows and columns, reset index, set types
+        .reindex(columns=columns)
+        .sort_values(sort_columns, kind="stable")
+        .reset_index(drop=True)
+        .astype({"id": "string", "span_id": "string", "annotator": "string", "start": "Int64", "end": "Int64", "label": "string"})
+    )
+    return spans
 
-
-def process_labels():
+def process_labels(corpus_ids: list[str]) -> pd.DataFrame:
     sourcedata_directory = config.directories["sourcedata"]
     labels_fpath = sourcedata_directory / config.source_filenames["labels"]
     mapping_fpath = sourcedata_directory / config.source_filenames["mapping"]
@@ -383,8 +567,14 @@ def process_labels():
         .pipe(lambda df: df.rename(columns=lambda x: "A" + string.ascii_uppercase[df.columns.get_loc(x)]))
         .melt(ignore_index=False, var_name="annotator", value_name="label")
         .replace({"label": {0: "non-lucid", 1: "lucid"}})
+        .query("id.isin(@corpus_ids)")
         .reset_index(drop=False)
     )
+    label_mapping = generate_identifier_mapping(df.index, nchars=3, seed=232323)
+    df = df.assign(label_id=df.index.map(label_mapping))
+    df = df.reindex(columns=["id", "label_id", "annotator", "label"])
+    df = df.sort_values(["id", "annotator", "label"])
+    df = df.reset_index(drop=True)
     # df["annotator"] = df["annotator"].str.split("_").str[1]
     # for r in raters:
     #     # assert df["label"].notna().all(), "Invalid lucidity values."
@@ -402,10 +592,11 @@ def process_labels():
     #     # export_path = utils.archive_directory / "annotations" / "labels" / f"annotator{i + 1}.jsonl"
     #     # export_path.parent.mkdir(parents=True, exist_ok=True)
     #     # df.reset_index().to_json(export_path, orient="records", lines=True, force_ascii=False)
+    df = df.astype({"id": "string", "label_id": "string", "annotator": "string", "label": "string"})
     return df
 
 
-def process_datapackage():
+def process_datapackage() -> dict:
     """
     Fill in the blanks in the datapackage template and export it to the derivatives directory.
     Get current date and time in ISO 8601 format
@@ -427,7 +618,7 @@ def process_datapackage():
     return data
 
 
-def validate_archive():
+def validate_archive() -> None:
     # Validate the exported archive.
     archive_dir = config.directories["archive"]
     with chdir(archive_dir):
@@ -437,8 +628,9 @@ def validate_archive():
         report = package.validate()
     if not report.valid:
         print(report.to_summary())
+        print("Archive was exported but is NOT valid. See above for details.")
     else:
-        print("Archive is valid.")
+        print("Archive was exported and validated. See above for details.")
     #     for task in report.tasks:
     #         if task.valid:
     #             name = task.name
@@ -455,37 +647,29 @@ def validate_archive():
 
 
 
-if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-o", "--overwrite", action="store_true", help="Overwrite existing files")
-    args = parser.parse_args()
 
-    overwrite = args.overwrite
+def main(overwrite: bool) -> None:
 
     # Based on overwrite, check if to-be-exported files already exist
     check_for_source_files()
     check_for_archive_files(overwrite)
 
     archive_directory = config.directories["archive"]
-
     archive_directory.mkdir(exist_ok=True, parents=False)
 
     corpus = process_corpus()
-    labels = process_labels()
-    spans = process_spans()
-    spans = spans.query("id.isin(@corpus.id)")
-    labels = labels.query("id.isin(@corpus.id)")
-    # corpus = corpus.merge(labels, on="id", how="left", validate="1:1")
-    id_mapping = generate_identifier_mapping(corpus["id"].unique(), nchars=8, seed=323232323232)
-    corpus["id"] = corpus["id"].map(id_mapping)
-    labels["id"] = labels["id"].map(id_mapping)
-    spans["id"] = spans["id"].map(id_mapping)
-    # spans = spans.dropna(subset=["id"])
+    corpus_texts = corpus.set_index("id")["text"].to_dict()
+    unique_corpus_ids = list(corpus_texts)
+    labels = process_labels(corpus_ids=unique_corpus_ids)
+    nlp = spacy.load("blank:en")
+    spans = process_spans(corpus_texts=corpus_texts, nlp=nlp)
 
-    labels = labels.astype("string")
-    spans = spans.astype({"id": "string", "annotator": "string", "start": "Int64", "end": "Int64", "label": "string"})
-    corpus = corpus.astype("string")
+    # corpus = corpus.merge(labels, on="id", how="left", validate="1:1")
+    id_mapping = generate_identifier_mapping(unique_corpus_ids, nchars=8, seed=323232323232)
+    corpus["id"] = corpus["id"].map(id_mapping).astype("string")
+    labels["id"] = labels["id"].map(id_mapping).astype("string")
+    spans["id"] = spans["id"].map(id_mapping).astype("string")
 
     export_paths = get_archive_paths()
     # Export tabular before processing the data package, because it uses the generated files
@@ -496,3 +680,14 @@ if __name__ == "__main__":
     export_json(datapackage, export_paths["datapackage"])
 
     validate_archive()
+
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-o", "--overwrite", action="store_true", help="Overwrite existing files")
+    args = parser.parse_args()
+
+    overwrite = args.overwrite
+    main(overwrite=overwrite)
