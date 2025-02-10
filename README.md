@@ -1,10 +1,10 @@
 # nightflight
 
-This repository contains code related to the preparation, description, and visualization of the **Dream Flight Archive**.
+This repository contains code related to the preparation, description, and visualization of the **NightFlight Corpus**.
 
-> The archive will soon to be available for public use on [Borealis](https://borealisdata.ca/).
+> The corpus will soon to be available for public use on [Borealis](https://borealisdata.ca/).
 
-The main content of the **Dream Flight Archive** is a manually-curated text corpus of flying dreams and observations about them. The archive additionally contains various human annotations, including binary labels of whether a dream is lucid and highlighted text spans of when lucidity or flying occur in a dream.
+The main content of the **NightFlight Corpus** is a manually-curated text corpus of flying dreams and observations about them. The archive additionally contains various human annotations, including binary labels of whether a dream is lucid and highlighted text spans of when lucidity or flying occur in a dream.
 
 ## Scripts
 

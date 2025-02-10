@@ -1,14 +1,18 @@
 name: nightflight
-
+channels:
+  - defaults
 dependencies:
   - python=3.11
-  - ipython  # development
-  - ruff  # development
+  - ipython
+  - ruff
   - numpy
   - pandas
-  - openpyxl  # read excel with pandas
+  - openpyxl
   - scikit-learn
   - matplotlib
-  - seaborn
-  - colorcet  # plot colormaps
-  - conda-forge::spacy  # plot spans
+  - colorcet
+  - conda-forge::spacy
+  - conda-forge::frictionless
+  - pip
+  - pip:
+    - pygamma-agreement

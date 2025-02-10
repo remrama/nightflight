@@ -1,10 +1,10 @@
 __pycache__/
 .conda/
 .ruff_cache/
-*.code-workspace
 
 archive/
 descriptives/
 figures/
 sourcedata/
 temp_*.py
+temp.*

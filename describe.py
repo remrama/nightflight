@@ -56,7 +56,9 @@ def calculate_label_agreement():
     """
     Evaluate agreement between islucid coders.
     """
-    coder1, coder2 = load_dfa("labels").pivot(index="id", columns="annotator").T.to_numpy()
+    coder1, coder2 = (
+        load_dfa("labels").pivot(index="id", columns="annotator").T.to_numpy()
+    )
     return pd.DataFrame(
         [
             {"metric": "accuracy", "value": metrics.accuracy_score(coder1, coder2)},
@@ -108,7 +110,6 @@ def calculate_subsources():
 
 
 if __name__ == "__main__":
-
     descriptives_directory = config.directories["descriptives"]
     descriptives_directory.mkdir(parents=False, exist_ok=True)
     tables_directory = descriptives_directory / "tables"

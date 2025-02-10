@@ -22,25 +22,58 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
 
+import frictionless
 import pandas as pd
 import spacy
-from frictionless import Package
 from spacy.language import Language
 from spacy.tokens import Span
 
 import config
 
 
+########################################################################################
+# UTILITY FUNCTIONS
+########################################################################################
 
-def export_json(data: dict, filepath: Union[str, Path], **kwargs: Optional[Any]) -> None:
+
+def export_json(
+    data: dict, filepath: Union[str, Path], **kwargs: Optional[Any]
+) -> None:
+    """
+    Export a dictionary to a JSON file.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary to export.
+    filepath : Union[str, Path]
+        Filepath to export the JSON file.
+    **kwargs : Optional[Any]
+        Additional keyword arguments to pass to `json.dump`.
+    """
     kwargs.setdefault("indent", 4)
     kwargs.setdefault("ensure_ascii", True)
     kwargs.setdefault("sort_keys", False)
     with filepath.open("w", encoding="utf-8") as f:
         json.dump(data, f, **kwargs)
-    return
+    return None
 
-def export_tabular(data: pd.DataFrame, filepath: Union[str, Path], **kwargs: Optional[Any]) -> None:
+
+def export_tabular(
+    data: pd.DataFrame, filepath: Union[str, Path], **kwargs: Optional[Any]
+) -> None:
+    """
+    Export a DataFrame to a tabular file.
+
+    Parameters
+    ----------
+    data : `pandas.DataFrame`
+        `pandas.DataFrame` to export.
+    filepath : Union[str, Path]
+        Filepath to export the tabular file.
+    **kwargs : Optional[Any]
+        Additional keyword arguments to pass to `pandas.DataFrame.to_csv`.
+    """
     kwargs.setdefault("index", False)
     kwargs.setdefault("sep", "\t")
     kwargs.setdefault("encoding", "utf-8")
@@ -52,28 +85,108 @@ def export_tabular(data: pd.DataFrame, filepath: Union[str, Path], **kwargs: Opt
     kwargs.setdefault("lineterminator", "\n")
     kwargs.setdefault("na_rep", "N/A")
     data.to_csv(filepath, **kwargs)
-    return
+    return None
 
 
 def get_file_hash(filepath: Union[str, Path], alg: str = "md5") -> str:
+    """
+    Get the hash of a file.
+
+    Parameters
+    ----------
+    filepath : Union[str, Path]
+        Filepath to the file to hash.
+    alg : str, optional
+        Hash algorithm to use, default is "md5".
+
+    Returns
+    -------
+    str
+        Hexadecimal hash digest of the file.
+    """
     hash_func = hashlib.new(alg)
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_func.update(chunk)
-    return hash_func.hexdigest()
+    hexdigest = hash_func.hexdigest()
+    return hexdigest
 
 
 def generate_identifier(length: int = 4, seed: Optional[int] = None) -> str:
+    """
+    Generate a random identifier string.
+
+    Parameters
+    ----------
+    length : int, optional
+        Length of the identifier, default is 4.
+    seed : Optional[int], optional
+        Seed for the random number generator, default is None.
+
+    Returns
+    -------
+    str
+        Random identifier string.
+
+    Raises
+    ------
+    ValueError
+        If the generated ID is not a valid Python identifier.
+
+    Notes
+    -----
+    The identifier is generated using alternating uppercase letters and digits.
+    Odd positions are uppercase letters, even positions are digits.
+
+    Examples
+    --------
+    >>> generate_identifier()
+    'A0Z7'
+    >>> generate_identifier(6)
+    'A0Z7A2'
+    """
     assert length >= 2, "Length must be at least 2"
     odd_chars = string.ascii_uppercase
     even_chars = string.digits
     rd = random.Random(seed)
-    id_ = "".join(rd.choice(odd_chars if i % 2 == 0 else even_chars) for i in range(length))
-    assert id_.isidentifier(), f"Generated ID is not a valid Python identifier: {id_}"
+    id_ = "".join(
+        rd.choice(odd_chars if i % 2 == 0 else even_chars) for i in range(length)
+    )
+    if not id_.isidentifier():
+        raise ValueError(f"Generated ID is not a valid Python identifier: {id_}")
     return id_
 
 
-def generate_identifier_mapping(unique_values: list[Union[int, str]], nchars: int = 4, seed: int = 32) -> dict:
+def generate_identifier_mapping(
+    unique_values: list[Union[int, str]], nchars: int = 4, seed: int = 32
+) -> dict:
+    """
+    Generate a mapping of unique values to random identifiers.
+
+    Parameters
+    ----------
+    unique_values : list[Union[int, str]]
+        List of unique values to map to identifiers.
+    nchars : int, optional
+        Length of the generated identifiers, default is 4.
+    seed : int, optional
+        Starting seed for the random number generator, default is 32.
+
+    Returns
+    -------
+    dict
+        Mapping of unique values to random identifiers.
+
+    Notes
+    -----
+    The seed is incremented by 1 for each identifier generated,
+    including when the generated identifier is not unique.
+
+    Examples
+    --------
+    >>> generate_identifier_mapping(["Alice", "Bob", "Charlie"])
+    {'Alice': 'A0Z7', 'Bob': 'A1Y6', 'Charlie': 'A2X5'}
+    """
     assert len(unique_values) == len(set(unique_values)), "Non-unique values found"
     mapping = {}
     for value in unique_values:
@@ -84,58 +197,83 @@ def generate_identifier_mapping(unique_values: list[Union[int, str]], nchars: in
 
 
 def get_archive_paths() -> dict[str, Path]:
+    """
+    Get the filepaths for the archive files.
+
+    Returns
+    -------
+    dict[str, Path]
+        Dictionary of filepaths for the archive files.
+
+    Examples
+    --------
+    >>> get_archive_paths()
+    {'datapackage': Path('archive/datapackage.json'), ...}
+    """
     archive_directory = config.directories["archive"]
-    datapackage_template_fp = config.directories["sourcedata"] / config.source_filenames["datapackage"]
+    datapackage_template_fp = (
+        config.directories["sourcedata"] / config.source_filenames["datapackage"]
+    )
     with datapackage_template_fp.open("r", encoding="utf-8") as f:
         data = json.load(f)
     resources = data["resources"]
     filepaths = {r["name"]: archive_directory / r["path"] for r in resources}
     filepaths["datapackage"] = archive_directory / "datapackage.json"
-    # filenames = {
-    #     "datapackage": "datapackage.json",
-    #     "corpus": f"{archive_acronym}-corpus.tsv",
-    #     "labels": f"{archive_acronym}-labels.tsv",
-    #     "spans": f"{archive_acronym}-spans.tsv",
-    # }
-    # filepaths = {name: archive_directory / fn for name, fn in filenames.items()}
     return filepaths
 
-def check_for_archive_files(overwrite: bool = False) -> None:
+
+def assert_archive_files_dont_exist(overwrite: bool = False) -> None:
+    """
+    Check if the archive files already exist.
+
+    Parameters
+    ----------
+    overwrite : bool, optional
+        If True, existing files will be replaced, default is `False`.
+
+    Raises
+    ------
+    FileExistsError
+        If the archive files already exist and `overwrite` is False.
+    """
     assert isinstance(overwrite, bool), "Overwrite must be a boolean."
+    # Get all possible archive filepaths
     fpaths = get_archive_paths().values()
     parent = config.directories["archive"]
-    parent_exists = parent.exists()
-    file_exists = any(fp.exists() for fp in fpaths)
-    if parent_exists:
-        assert parent.is_dir(), f"{parent} is not a directory."
     for fp in fpaths:
         if fp.exists():
-            assert fp.is_file(), f"{fp} is not a file."
-    if overwrite:
-        if file_exists:
-            for fp in fpaths:
-                if fp.exists():
-                    fp.unlink()
-        if parent_exists:
-            parent.rmdir()
-    elif not overwrite:
-        assert not file_exists, "Archive files already exist. Use -o/--overwrite to replace them."
-        assert not parent_exists, "Archive directory already exists. Use -o/--overwrite to replace it."
-    return
+            assert fp.is_file(), f"{fp} exists but is not a file."
+            if not overwrite:
+                raise FileExistsError(f"Archive file already exists: {fp}")
+            else:
+                fp.unlink()
+        if parent.exists():
+            assert parent.is_dir(), f"{parent} exists but is not a directory."
+            if not overwrite:
+                raise FileExistsError(f"Archive directory already exists: {parent}")
+            else:
+                parent.rmdir()
+    return None
 
 
-def check_for_source_files() -> None:
+def assert_source_files_exist() -> None:
     """
-    Check if the source files are present in the sourcedata directory.
+    Raise error if a required source file is missing.
 
     Raises
     ------
     FileNotFoundError
-        If the source files are not present in the sourcedata directory.
+        If a source file is not present in the sourcedata directory.
     """
     sourcedata_directory = config.directories["sourcedata"]
     if not sourcedata_directory.exists():
-        raise FileNotFoundError(f"Source data directory not found at '{sourcedata_directory}'.")
+        raise FileNotFoundError(
+            f"Source data directory not found at '{sourcedata_directory}'."
+        )
+    if not sourcedata_directory.is_dir():
+        raise ValueError(
+            f"Source data directory is not a directory: '{sourcedata_directory}'."
+        )
     source_fnames = []
     for value in config.source_filenames.values():
         if isinstance(value, list):
@@ -143,10 +281,20 @@ def check_for_source_files() -> None:
         elif isinstance(value, str):
             source_fnames.append(value)
         else:
-            raise TypeError(f"Unexpected type {type(value)} for source filename {value}.")
+            raise TypeError(
+                f"Unexpected type {type(value)} for source filename {value}."
+            )
     for fn in source_fnames:
         if not (sourcedata_directory / fn).exists():
-            raise FileNotFoundError(f"Source file '{fn}' not found in '{sourcedata_directory}'.")
+            raise FileNotFoundError(
+                f"Source file '{fn}' not found in '{sourcedata_directory}'."
+            )
+    return None
+
+
+########################################################################################
+# SPAN ANNOTATION FUNCTIONS
+########################################################################################
 
 
 def _merge_overlapping_spans(spans: list[Span]) -> list[Span]:
@@ -165,7 +313,9 @@ def _merge_overlapping_spans(spans: list[Span]) -> list[Span]:
     >>> merged_spans
     [Span(doc, 0, 8, label="flying")]
     """
-    assert all(isinstance(span, Span) for span in spans), "All spans must be Span objects"
+    assert all(isinstance(span, Span) for span in spans), (
+        "All spans must be Span objects"
+    )
     merged_spans = spacy.util.filter_spans(spans)
     return merged_spans
 
@@ -186,7 +336,9 @@ def _merge_touching_spans(spans: list[Span]) -> list[Span]:
     >>> merged_spans
     [Span(doc, 0, 8, label="flying")]
     """
-    assert all(isinstance(span, Span) for span in spans), "All spans must be Span objects"
+    assert all(isinstance(span, Span) for span in spans), (
+        "All spans must be Span objects"
+    )
     merged_spans = []
     for span in spans:
         if merged_spans and merged_spans[-1].end == span.start:
@@ -202,7 +354,9 @@ def _merge_touching_spans(spans: list[Span]) -> list[Span]:
     return merged_spans
 
 
-def merge_spans_on_groupby(df: pd.DataFrame, texts: dict[str, str], nlp: Language) -> pd.DataFrame:
+def merge_spans_on_groupby(
+    df: pd.DataFrame, texts: dict[str, str], nlp: Language
+) -> pd.DataFrame:
     """
     This function is used to merge overlapping spans within a groupby object.
     The overall number of spans is reduced because it combines overlapping
@@ -227,7 +381,7 @@ def merge_spans_on_groupby(df: pd.DataFrame, texts: dict[str, str], nlp: Languag
     pd.DataFrame
         DataFrame with columns ["annotator", "label", "start", "end", "span_id"]
         where overlapping and touching spans have been merged.
-        
+
     Example
     -------
     >>> df = pd.DataFrame({
@@ -248,13 +402,18 @@ def merge_spans_on_groupby(df: pd.DataFrame, texts: dict[str, str], nlp: Languag
     # id_ = "A0Z7A2J1"
     text = texts[id_]
     doc = nlp(text)
+
     def _row_to_token_span(row: pd.Series) -> Span:
         """Extract row data about character span and return spaCy token span."""
-        return doc.char_span(row["start"], row["end"], label=row["label"], alignment_mode="expand")
+        return doc.char_span(
+            row["start"], row["end"], label=row["label"], alignment_mode="expand"
+        )
         # return doc.char_span(row["start"], row["end"], label=row["label"], span_id=row["span_id"], alignment_mode="expand")
 
     spans_data = []
-    for (annotator, label), df_ in df.groupby(["annotator", "label"]): #, as_index=True, sort=True):
+    for (annotator, label), df_ in df.groupby(
+        ["annotator", "label"]
+    ):  # , as_index=True, sort=True):
         raw_spans = df_.apply(_row_to_token_span, axis=1).tolist()
         assert all(raw_spans), "Invalid span"
         merged_spans_no_overlap = _merge_overlapping_spans(raw_spans)
@@ -281,6 +440,11 @@ def merge_spans_on_groupby(df: pd.DataFrame, texts: dict[str, str], nlp: Languag
     # group = SpanGroup(doc, name=label, spans=merged_spans, attrs={"annotator": annotator})
     # doc.spans[ann] = group
     # span_groups.append(group)
+
+
+########################################################################################
+# PROCESSORS - MAIN PROCESSING FUNCTIONS
+########################################################################################
 
 
 def process_corpus() -> pd.DataFrame:
@@ -429,7 +593,9 @@ def process_corpus() -> pd.DataFrame:
     # Fill empty thread keywords with arbitrary but unique names
     # (To make sure they have unique values when generating thread IDs)
     # (To make sure they have content when merging sources and subsources)
-    df.loc[df["thread"].isna(), "thread"] = [str(i) for i in range(df["thread"].isna().sum())]
+    df.loc[df["thread"].isna(), "thread"] = [
+        str(i) for i in range(df["thread"].isna().sum())
+    ]
 
     df = (
         df
@@ -444,8 +610,12 @@ def process_corpus() -> pd.DataFrame:
         .reset_index(drop=True)
     )
     # Convert existing author IDs to randomized codes
-    author_mapping = generate_identifier_mapping(df["author"].unique(), nchars=4, seed=32)
-    thread_mapping = generate_identifier_mapping(df["thread"].unique(), nchars=6, seed=323232)
+    author_mapping = generate_identifier_mapping(
+        df["author"].unique(), nchars=4, seed=32
+    )
+    thread_mapping = generate_identifier_mapping(
+        df["thread"].unique(), nchars=6, seed=323232
+    )
     # report_mapping = generate_identifier_mapping(df["id"].unique(), nchars=8, seed=323232323232)
     df["author"] = df["author"].map(author_mapping)
     df["thread"] = df["thread"].map(thread_mapping)
@@ -471,81 +641,6 @@ def process_corpus() -> pd.DataFrame:
     return df
 
 
-def process_spans(corpus_texts: dict[str, str], nlp: Language) -> pd.DataFrame:
-    """
-    Load and process the span annotations from the source files.
-    Each annotator's Doccano annotation file is loaded and the spans are extracted.
-    All annotations/annotators are combined into one dataframe.
-    """
-    def _insert_empty_spans(spans_list: list[list[Optional[str]]]) -> list[list[Optional[str]]]:
-        # Mostly a correction step bc they annotated both at the same time so not really an "empty" output
-        # Get labels from datapackage
-        empty_code = pd.NA
-        possible_labels = ["lucid", "flying"]
-        annotated_labels = [x[2] for x in spans_list]
-        for label in possible_labels:
-            if label not in annotated_labels:
-                spans_list.append([empty_code, empty_code, label])
-        return spans_list
-
-    annotator_fnames = config.source_filenames["spans"]
-    sourcedata_directory = config.directories["sourcedata"]
-    annotations = {}
-    for i, fn in enumerate(sorted(annotator_fnames)):
-        annotations["A" + string.ascii_uppercase[i]] = (
-            pd.read_json(sourcedata_directory / fn, lines=True)
-            .drop(columns=["id"])
-            .rename(columns={"report_id": "id", "label": "spans"})
-            .set_index("id")
-            ["spans"]
-        )
-    raw_spans = (
-        pd.concat(annotations, names=["annotator"])
-        .explode()
-        .apply(pd.Series)
-        .rename(columns={0: "start", 1: "end", 2: "label"})
-        .swaplevel()
-        .reset_index(drop=False)
-    )
-    columns = ["id", "span_id", "annotator", "start", "end", "label"]
-    sort_columns = ["annotator", "label", "start"]
-    corpus_ids = list(corpus_texts.keys())
-    merged_spans = (
-        raw_spans
-        .query("id.isin(@corpus_ids)")
-        # Span merging
-        .groupby("id", as_index=True)
-        .apply(merge_spans_on_groupby, include_groups=False, texts=corpus_texts, nlp=nlp)
-        .reset_index("id", drop=False)
-        # # Fill empty spans
-        # .apply(_insert_empty_spans)
-    )
-    # Add empty spans to id/annotator/label combos that don't exist
-    empty_spans = (
-        merged_spans
-        .groupby(["id", "annotator"])["label"]
-        .value_counts()
-        .unstack(["annotator", "label"], fill_value=0)
-        .eq(0)
-        .melt(value_name="no_spans", ignore_index=False)
-        .query("no_spans")
-        .drop(columns=["no_spans"])
-        .reset_index(drop=False)
-        # .assign(start=pd.NA, end=pd.NA)
-    )
-    spans = pd.concat([merged_spans, empty_spans], axis=0, ignore_index=True)
-    span_mapping = generate_identifier_mapping(spans.index, nchars=3, seed=23)
-    spans = (
-        spans
-        .assign(span_id=spans.index.map(span_mapping))
-        # Tidy up: sort rows and columns, reset index, set types
-        .reindex(columns=columns)
-        .sort_values(sort_columns, kind="stable")
-        .reset_index(drop=True)
-        .astype({"id": "string", "span_id": "string", "annotator": "string", "start": "Int64", "end": "Int64", "label": "string"})
-    )
-    return spans
-
 def process_labels(corpus_ids: list[str]) -> pd.DataFrame:
     sourcedata_directory = config.directories["sourcedata"]
     labels_fpath = sourcedata_directory / config.source_filenames["labels"]
@@ -559,12 +654,15 @@ def process_labels(corpus_ids: list[str]) -> pd.DataFrame:
     # print("Number of missing report IDs:", n_missing_report_ids)
     # Drop missing IDs
     df = (
-        labels
-        .dropna(subset=["id"])
+        labels.dropna(subset=["id"])
         .set_index("id")
         .filter(regex=r"Lucidity_(T|C)[A-Z]{1,3}")
         .sort_index(axis="columns")
-        .pipe(lambda df: df.rename(columns=lambda x: "A" + string.ascii_uppercase[df.columns.get_loc(x)]))
+        .pipe(
+            lambda df: df.rename(
+                columns=lambda x: "A" + string.ascii_uppercase[df.columns.get_loc(x)]
+            )
+        )
         .melt(ignore_index=False, var_name="annotator", value_name="label")
         .replace({"label": {0: "non-lucid", 1: "lucid"}})
         .query("id.isin(@corpus_ids)")
@@ -592,8 +690,93 @@ def process_labels(corpus_ids: list[str]) -> pd.DataFrame:
     #     # export_path = utils.archive_directory / "annotations" / "labels" / f"annotator{i + 1}.jsonl"
     #     # export_path.parent.mkdir(parents=True, exist_ok=True)
     #     # df.reset_index().to_json(export_path, orient="records", lines=True, force_ascii=False)
-    df = df.astype({"id": "string", "label_id": "string", "annotator": "string", "label": "string"})
+    df = df.astype(
+        {"id": "string", "label_id": "string", "annotator": "string", "label": "string"}
+    )
     return df
+
+
+def process_spans(corpus_texts: dict[str, str], nlp: Language) -> pd.DataFrame:
+    """
+    Load and process the span annotations from the source files.
+    Each annotator's Doccano annotation file is loaded and the spans are extracted.
+    All annotations/annotators are combined into one dataframe.
+    """
+    # def _insert_empty_spans(spans_list: list[list[Optional[str]]]) -> list[list[Optional[str]]]:
+    #     # Mostly a correction step bc they annotated both at the same time so not really an "empty" output
+    #     # Get labels from datapackage
+    #     empty_code = pd.NA
+    #     possible_labels = ["lucid", "flying"]
+    #     annotated_labels = [x[2] for x in spans_list]
+    #     for label in possible_labels:
+    #         if label not in annotated_labels:
+    #             spans_list.append([empty_code, empty_code, label])
+    #     return spans_list
+
+    annotator_fnames = config.source_filenames["spans"]
+    sourcedata_directory = config.directories["sourcedata"]
+    annotations = {}
+    for i, fn in enumerate(sorted(annotator_fnames)):
+        annotations["A" + string.ascii_uppercase[i]] = (
+            pd.read_json(sourcedata_directory / fn, lines=True)
+            .drop(columns=["id"])
+            .rename(columns={"report_id": "id", "label": "spans"})
+            .set_index("id")["spans"]
+        )
+    raw_spans = (
+        pd.concat(annotations, names=["annotator"])
+        .explode()
+        .apply(pd.Series)
+        .rename(columns={0: "start", 1: "end", 2: "label"})
+        .swaplevel()
+        .reset_index(drop=False)
+    )
+    columns = ["id", "span_id", "annotator", "start", "end", "label"]
+    sort_columns = ["annotator", "label", "start"]
+    # corpus_ids = list(corpus_texts.keys())
+    merged_spans = (
+        raw_spans.query("id.isin(@corpus_ids)")
+        # Span merging
+        .groupby("id", as_index=True)
+        .apply(
+            merge_spans_on_groupby, include_groups=False, texts=corpus_texts, nlp=nlp
+        )
+        .reset_index("id", drop=False)
+        # # Fill empty spans
+        # .apply(_insert_empty_spans)
+    )
+    # Add empty spans to id/annotator/label combos that don't exist
+    empty_spans = (
+        merged_spans.groupby(["id", "annotator"])["label"]
+        .value_counts()
+        .unstack(["annotator", "label"], fill_value=0)
+        .eq(0)
+        .melt(value_name="no_spans", ignore_index=False)
+        .query("no_spans")
+        .drop(columns=["no_spans"])
+        .reset_index(drop=False)
+        # .assign(start=pd.NA, end=pd.NA)
+    )
+    spans = pd.concat([merged_spans, empty_spans], axis=0, ignore_index=True)
+    span_mapping = generate_identifier_mapping(spans.index, nchars=3, seed=23)
+    spans = (
+        spans.assign(span_id=spans.index.map(span_mapping))
+        # Tidy up: sort rows and columns, reset index, set types
+        .reindex(columns=columns)
+        .sort_values(sort_columns, kind="stable")
+        .reset_index(drop=True)
+        .astype(
+            {
+                "id": "string",
+                "span_id": "string",
+                "annotator": "string",
+                "start": "Int64",
+                "end": "Int64",
+                "label": "string",
+            }
+        )
+    )
+    return spans
 
 
 def process_datapackage() -> dict:
@@ -602,7 +785,9 @@ def process_datapackage() -> dict:
     Get current date and time in ISO 8601 format
     """
     # Load template
-    import_path = config.directories["sourcedata"] / config.source_filenames["datapackage"]
+    import_path = (
+        config.directories["sourcedata"] / config.source_filenames["datapackage"]
+    )
     with import_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     # Fill empty values that need to be generated from files that were just made
@@ -611,26 +796,41 @@ def process_datapackage() -> dict:
     for r in data["resources"]:
         fp = config.directories["archive"] / r["path"]
         assert fp.exists(), f"Resource file not found: {fp}"
-        assert (x := r["format"]) == (y := fp.suffix[1:]), f"File format mismatch: {x} != {y}"
-        assert (x := r["mediatype"]) == (y := mimetypes.guess_type(fp)[0]), f"Media type mismatch: {x} != {y}"
+        assert (x := r["format"]) == (y := fp.suffix[1:]), (
+            f"File format mismatch: {x} != {y}"
+        )
+        assert (x := r["mediatype"]) == (y := mimetypes.guess_type(fp)[0]), (
+            f"Media type mismatch: {x} != {y}"
+        )
         r["hash"] = get_file_hash(fp)
         r["bytes"] = fp.stat().st_size
     return data
 
 
-def validate_archive() -> None:
-    # Validate the exported archive.
+def validate_archive() -> frictionless.Report:
+    """
+    Validate the exported archive using Frictionless.
+
+    Returns
+    -------
+    Report
+        Validation report from Frictionless.
+    """
     archive_dir = config.directories["archive"]
+    # Move to the archive directory for relatives paths in `datapackage.json`
     with chdir(archive_dir):
-        # This will catch with a FrictionlessException if the datapackage.json is not valid.
-        package = Package("datapackage.json")
-        # This will validate resources in package (and other things)
+        # Load and validate the metadata.
+        # This will catch with a FrictionlessException
+        # if the datapackage.json is not valid (does not follow schema).
+        package = frictionless.Package("datapackage.json")
+        # Validate the tabular resources (and other things) within the package.
         report = package.validate()
     if not report.valid:
-        print(report.to_summary())
-        print("Archive was exported but is NOT valid. See above for details.")
-    else:
-        print("Archive was exported and validated. See above for details.")
+        print(report.summary())
+        raise frictionless.errors.ReportError(
+            "Archive was exported but is NOT valid. See above for details."
+        )
+    return report
     #     for task in report.tasks:
     #         if task.valid:
     #             name = task.name
@@ -638,7 +838,6 @@ def validate_archive() -> None:
     #             stats = task.stats
     #             hash_ = stats["hash"]
     #             bytes_ = stats["bytes"]
-
     # version = report["version"]
     # from pandera.io import from_frictionless_schema
     # for resource in data["resources"]:
@@ -646,47 +845,65 @@ def validate_archive() -> None:
     #     pandera_schema = from_frictionless_schema(frictionless_schema)
 
 
-
-
-
 def main(overwrite: bool) -> None:
+    """
+    Main function to prepare the data for export.
 
-    # Based on overwrite, check if to-be-exported files already exist
-    check_for_source_files()
-    check_for_archive_files(overwrite)
+    Parameters
+    ----------
+    overwrite : bool
+        If True, overwrite existing files.
+    """
 
-    archive_directory = config.directories["archive"]
-    archive_directory.mkdir(exist_ok=True, parents=False)
+    # Make sure all required source files are present
+    assert_source_files_exist()
+    # Make sure none of the to-be-written archive files are present
+    assert_archive_files_dont_exist(overwrite)
 
+    # Load and process the main text corpus
     corpus = process_corpus()
+
+    # Load and process the binary label annotations
     corpus_texts = corpus.set_index("id")["text"].to_dict()
     unique_corpus_ids = list(corpus_texts)
     labels = process_labels(corpus_ids=unique_corpus_ids)
-    nlp = spacy.load("blank:en")
+
+    # Load and process the span annotations
+    # nlp = spacy.load("blank:en")
+    nlp = spacy.blank("en")
     spans = process_spans(corpus_texts=corpus_texts, nlp=nlp)
 
+    # Add unique identifiers that map across all tables
     # corpus = corpus.merge(labels, on="id", how="left", validate="1:1")
-    id_mapping = generate_identifier_mapping(unique_corpus_ids, nchars=8, seed=323232323232)
+    id_mapping = generate_identifier_mapping(
+        unique_corpus_ids, nchars=8, seed=323232323232
+    )
     corpus["id"] = corpus["id"].map(id_mapping).astype("string")
     labels["id"] = labels["id"].map(id_mapping).astype("string")
     spans["id"] = spans["id"].map(id_mapping).astype("string")
 
+    # Write tabular files
     export_paths = get_archive_paths()
-    # Export tabular before processing the data package, because it uses the generated files
+    parent = config.directories["archive"]
+    parent.mkdir(parents=False, exist_ok=False)
     export_tabular(corpus, export_paths["corpus"])
     export_tabular(labels, export_paths["labels"])
     export_tabular(spans, export_paths["spans"])
+
+    # Create datapackage JSON
     datapackage = process_datapackage()
+    # Write datapackage JSON metadata
     export_json(datapackage, export_paths["datapackage"])
 
+    # Validate entire archive
     validate_archive()
 
 
-
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-o", "--overwrite", action="store_true", help="Overwrite existing files")
+    parser.add_argument(
+        "-o", "--overwrite", action="store_true", help="Overwrite existing files"
+    )
     args = parser.parse_args()
 
     overwrite = args.overwrite

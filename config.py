@@ -1,7 +1,11 @@
+"""
+Configuration file with global variables
+"""
+
 import logging
 from pathlib import Path
 
-_sourcedata_dir = "./sourcedata"  # READ-ONLY!!!
+_sourcedata_dir = "./sourcedata"  # READ-ONLY
 _descriptives_dir = "./descriptives"  # WRITE
 _archive_dir = "./archive"  # WRITE
 
@@ -11,6 +15,7 @@ directories = {
     "archive": Path(_archive_dir),
 }
 
+# These source files must be present to run from beginning
 source_filenames = {
     "datapackage": "datapackage-template.json",
     "corpus": "fdd-v0.2.0.xlsx",
@@ -23,6 +28,7 @@ archive_metadata = {
     "full_name": "Dream Flight Archive",
     "version": "0.0.1-beta",
 }
+
 
 def get_logger(fstem=None, **kwargs):
     fstem = fstem or "misc"

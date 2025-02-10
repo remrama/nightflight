@@ -1,6 +1,7 @@
 """
 Validate the exported archive.
 """
+
 from contextlib import chdir
 from frictionless import Package
 
@@ -32,5 +33,3 @@ else:
 # for resource in data["resources"]:
 #     frictionless_schema = resource["schema"]
 #     pandera_schema = from_frictionless_schema(frictionless_schema)
-
-

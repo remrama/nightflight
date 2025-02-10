@@ -1,6 +1,7 @@
 """
 Plotting functions for visualizing the descriptive statistics of the archive.
 """
+
 import argparse
 
 import colorcet as cc
@@ -37,7 +38,7 @@ def set_rcparams(**kwargs) -> None:
         "mathtext.fontset": "custom",
         "mathtext.rm": "Arial",
         "mathtext.it": "Arial:italic",
-        "mathtext.bf": "Arial:bold"
+        "mathtext.bf": "Arial:bold",
     }
     rcparams.update(kwargs)
     plt.rcParams.update(rcparams)
@@ -48,7 +49,7 @@ def get_palette():
         "narrative": "#0c7bdc",
         "observation": "#ffc20a",
         "lucid": "#29c9e6",  # #29cae7
-        "flying": "#fca094"  # #fda094
+        "flying": "#fca094",  # #fda094
     }
 
 
@@ -63,7 +64,7 @@ def get_markers():
         "Reddit": "^",
         "SDDb": "*",
         "StraightDope": "p",
-        "Twitter": ">"
+        "Twitter": ">",
     }
 
 
@@ -132,7 +133,9 @@ def plot_annotation():
     data = {"text": text, "spans": spans, "tokens": tokens}
     options = {"colors": palette}
     html = displacy.render(data, style="span", manual=True, options=options)
-    html = html.replace('ltr"', 'ltr; text-align: center; max-width: 6in; margin: 0 auto;"')
+    html = html.replace(
+        'ltr"', 'ltr; text-align: center; max-width: 6in; margin: 0 auto;"'
+    )
     return html
 
 
@@ -154,7 +157,9 @@ def plot_authors():
         m = markers[source]
         z = type_order.index(report_type) + 1
         if x and y:
-            ax.scatter(x, y, color=c, marker=m, zorder=z, label=report_type, **scatter_kwargs)
+            ax.scatter(
+                x, y, color=c, marker=m, zorder=z, label=report_type, **scatter_kwargs
+            )
     ax.plot([0, 1], [0, 1], "--", lw=1, color="black", zorder=0, transform=ax.transAxes)
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -164,7 +169,9 @@ def plot_authors():
     ax.set_ybound(upper=10000)
     ax.set_aspect(1)
     patch_kwargs = dict(linewidth=0)
-    line2d_kwargs = dict(markersize=6, color="gray", markerfacecolor="gray", linewidth=0)
+    line2d_kwargs = dict(
+        markersize=6, color="gray", markerfacecolor="gray", linewidth=0
+    )
     legend_kwargs = dict(
         frameon=False,
         title_fontsize=8,
@@ -174,7 +181,11 @@ def plot_authors():
         borderaxespad=0,
     )
     report_type_handles = [
-        Patch(facecolor=palette[report_type], label=report_type.capitalize(), **patch_kwargs)
+        Patch(
+            facecolor=palette[report_type],
+            label=report_type.capitalize(),
+            **patch_kwargs,
+        )
         for report_type in type_order
     ]
     source_handles = [
@@ -211,16 +222,24 @@ def plot_sources():
         ax.bar(xvals, yvals, bottom=ybottom, color=cvals, **bar_kwargs)
         ybottom += yvals
     ax.set_xticks(xvals)
-    ax.set_xticklabels(report_counts.index.to_list(), rotation=40, ha="right", fontsize=8)
+    ax.set_xticklabels(
+        report_counts.index.to_list(), rotation=40, ha="right", fontsize=8
+    )
     ax.set_xlabel("Data source")
     ax.set_ylabel("Number of reports")
     # ax.yaxis.set(major_locator=plt.MultipleLocator(500), minor_locator=plt.MultipleLocator(100))
     ax.set_yscale("log")
     ax.set_ybound(upper=10000)
-    ax.yaxis.grid(True, which="major", linestyle="solid", linewidth=0.5, color="black", alpha=1)
-    ax.yaxis.grid(True, which="minor", linestyle="solid", linewidth=0.5, color="black", alpha=0.1)
+    ax.yaxis.grid(
+        True, which="major", linestyle="solid", linewidth=0.5, color="black", alpha=1
+    )
+    ax.yaxis.grid(
+        True, which="minor", linestyle="solid", linewidth=0.5, color="black", alpha=0.1
+    )
     ax.set_axisbelow(True)
-    patch_kwargs = dict(edgecolor=bar_kwargs["edgecolor"], linewidth=bar_kwargs["linewidth"])
+    patch_kwargs = dict(
+        edgecolor=bar_kwargs["edgecolor"], linewidth=bar_kwargs["linewidth"]
+    )
     handles = [
         Patch(facecolor=palette[report_type], label=report_type, **patch_kwargs)
         for report_type in type_order
@@ -284,11 +303,16 @@ def plot_wordcount():
     ax.set_xticklabels(xtick_labels, rotation=40, ha="right", fontsize=8)
 
 
-
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-e", "--extensions", nargs="+", default=["png"], choices=["png", "svg", "pdf", "eps"], help="Output formats")
+    parser.add_argument(
+        "-e",
+        "--extensions",
+        nargs="+",
+        default=["png"],
+        choices=["png", "svg", "pdf", "eps"],
+        help="Output formats",
+    )
     args = parser.parse_args()
 
     img_extensions = args.extensions
